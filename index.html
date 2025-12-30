@@ -23,6 +23,9 @@
     import { STLLoader } from 'three/addons/loaders/STLLoader.js';
     import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+    import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+    import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
     import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
     import { STLExporter } from 'three/addons/exporters/STLExporter.js';
     import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -34,7 +37,7 @@
         this.outputFormat = 'gltf';
         this.isProcessing = false;
         this.supportedFormats = {
-          input: ['obj', 'stl', 'ply', 'gltf', 'glb'],
+          input: ['obj', 'stl', 'ply', 'gltf', 'glb', '3mf', 'fbx', 'dae'],
           output: ['gltf', 'glb', 'obj', 'stl', 'ply']
         };
         this.init();
@@ -46,6 +49,34 @@
           this.outputFormat = e.target.value;
         });
         document.getElementById('convert-btn').addEventListener('click', () => this.handleConvert());
+        
+        // Add drag and drop functionality
+        const dropZone = document.getElementById('drop-zone');
+        
+        dropZone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropZone.classList.add('border-purple-300', 'bg-white/10');
+        });
+        
+        dropZone.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropZone.classList.remove('border-purple-300', 'bg-white/10');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropZone.classList.remove('border-purple-300', 'bg-white/10');
+          
+          const files = e.dataTransfer.files;
+          if (files.length > 0) {
+            this.file = files[0];
+            document.getElementById('file-name').textContent = this.file.name;
+            this.setStatus('', 'info');
+          }
+        });
       }
 
       handleFileUpload(e) {
@@ -112,6 +143,34 @@
           const loader = new GLTFLoader();
           loader.parse(buffer, '', (gltf) => {
             resolve(gltf.scene);
+          }, reject);
+        });
+      }
+
+      async parse3MF(buffer) {
+        return new Promise((resolve, reject) => {
+          const loader = new ThreeMFLoader();
+          loader.parse(buffer, (object) => {
+            const scene = new THREE.Scene();
+            scene.add(object);
+            resolve(scene);
+          }, undefined, reject);
+        });
+      }
+
+      async parseFBX(buffer) {
+        const loader = new FBXLoader();
+        const object = loader.parse(buffer);
+        const scene = new THREE.Scene();
+        scene.add(object);
+        return scene;
+      }
+
+      async parseCollada(text) {
+        return new Promise((resolve, reject) => {
+          const loader = new ColladaLoader();
+          loader.parse(text, '', (collada) => {
+            resolve(collada.scene);
           }, reject);
         });
       }
@@ -191,6 +250,15 @@
           } else if (ext === 'gltf' || ext === 'glb') {
             const buffer = await this.file.arrayBuffer();
             loadedScene = await this.parseGLTF(buffer);
+          } else if (ext === '3mf') {
+            const buffer = await this.file.arrayBuffer();
+            loadedScene = await this.parse3MF(buffer);
+          } else if (ext === 'fbx') {
+            const buffer = await this.file.arrayBuffer();
+            loadedScene = await this.parseFBX(buffer);
+          } else if (ext === 'dae') {
+            const text = await this.file.text();
+            loadedScene = await this.parseCollada(text);
           } else {
             this.setStatus(`Input format .${ext} not supported. Supported: ${this.supportedFormats.input.join(', ')}`, 'error');
             this.isProcessing = false;
@@ -258,12 +326,13 @@
             <div class="relative">
               <input
                 type="file"
-                accept=".obj,.stl,.ply,.gltf,.glb"
+                accept=".obj,.stl,.ply,.gltf,.glb,.3mf,.fbx,.dae"
                 class="hidden"
                 id="file-upload"
               />
               <label
                 for="file-upload"
+                id="drop-zone"
                 class="flex items-center justify-center w-full p-6 border-2 border-dashed border-purple-400 rounded-lg cursor-pointer hover:border-purple-300 hover:bg-white/5 transition-all"
               >
                 <div class="text-center">
@@ -272,7 +341,7 @@
                   </svg>
                   <span class="text-white" id="file-name">Click to upload or drag and drop</span>
                   <p class="text-purple-300 text-sm mt-1">
-                    Supported: OBJ, STL, PLY, GLTF, GLB
+                    Supported: OBJ, STL, PLY, GLTF, GLB, 3MF, FBX, DAE
                   </p>
                 </div>
               </label>
@@ -314,7 +383,7 @@
         <div class="mt-8 pt-6 border-t border-white/10">
           <h3 class="text-white font-medium mb-3">How to use:</h3>
           <ol class="text-purple-200 text-sm space-y-2">
-            <li>1. Upload your 3D file (OBJ, STL, PLY, GLTF, or GLB)</li>
+            <li>1. Upload your 3D file (OBJ, STL, PLY, GLTF, GLB, 3MF, FBX, or DAE)</li>
             <li>2. Select your desired output format</li>
             <li>3. Click "Convert & Download" to get your converted file</li>
           </ol>
