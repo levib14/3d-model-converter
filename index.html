@@ -1,0 +1,290 @@
+import React, { useState } from 'react';
+import { Upload, Download, AlertCircle, Check, Loader2 } from 'lucide-react';
+import * as THREE from 'three';
+
+const FormatConverter = () => {
+  const [file, setFile] = useState(null);
+  const [outputFormat, setOutputFormat] = useState('gltf');
+  const [status, setStatus] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [scene, setScene] = useState(null);
+
+  const supportedFormats = {
+    input: ['obj', 'stl', 'ply', 'fbx', 'dae', 'gltf', 'glb'],
+    output: ['gltf', 'glb', 'obj', 'stl', 'ply']
+  };
+
+  const parseOBJ = (text) => {
+    const loader = new THREE.OBJLoader();
+    return loader.parse(text);
+  };
+
+  const parseSTL = (buffer) => {
+    const loader = new THREE.STLLoader();
+    const geometry = loader.parse(buffer);
+    const material = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const mesh = new THREE.Mesh(geometry, material);
+    const scene = new THREE.Scene();
+    scene.add(mesh);
+    return scene;
+  };
+
+  const parsePLY = (buffer) => {
+    const loader = new THREE.PLYLoader();
+    const geometry = loader.parse(buffer);
+    const material = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const mesh = new THREE.Mesh(geometry, material);
+    const scene = new THREE.Scene();
+    scene.add(mesh);
+    return scene;
+  };
+
+  const parseGLTF = async (buffer) => {
+    return new Promise((resolve, reject) => {
+      const loader = new THREE.GLTFLoader();
+      loader.parse(buffer, '', (gltf) => {
+        resolve(gltf.scene);
+      }, reject);
+    });
+  };
+
+  const exportToGLTF = (scene) => {
+    const exporter = new THREE.GLTFExporter();
+    return new Promise((resolve) => {
+      exporter.parse(scene, (result) => {
+        const output = JSON.stringify(result, null, 2);
+        resolve(new Blob([output], { type: 'application/json' }));
+      }, { binary: false });
+    });
+  };
+
+  const exportToGLB = (scene) => {
+    const exporter = new THREE.GLTFExporter();
+    return new Promise((resolve) => {
+      exporter.parse(scene, (result) => {
+        resolve(new Blob([result], { type: 'application/octet-stream' }));
+      }, { binary: true });
+    });
+  };
+
+  const exportToOBJ = (scene) => {
+    const exporter = new THREE.OBJExporter();
+    const result = exporter.parse(scene);
+    return new Blob([result], { type: 'text/plain' });
+  };
+
+  const exportToSTL = (scene) => {
+    const exporter = new THREE.STLExporter();
+    const result = exporter.parse(scene);
+    return new Blob([result], { type: 'application/octet-stream' });
+  };
+
+  const exportToPLY = (scene) => {
+    const exporter = new THREE.PLYExporter();
+    return new Promise((resolve) => {
+      exporter.parse(scene, (result) => {
+        resolve(new Blob([result], { type: 'text/plain' }));
+      }, { binary: false });
+    });
+  };
+
+  const handleFileUpload = (e) => {
+    const uploadedFile = e.target.files[0];
+    if (uploadedFile) {
+      setFile(uploadedFile);
+      setStatus('');
+    }
+  };
+
+  const getFileExtension = (filename) => {
+    return filename.split('.').pop().toLowerCase();
+  };
+
+  const handleConvert = async () => {
+    if (!file) {
+      setStatus('Please select a file first');
+      return;
+    }
+
+    setIsProcessing(true);
+    setStatus('Processing...');
+
+    try {
+      const ext = getFileExtension(file.name);
+      let loadedScene;
+
+      if (ext === 'obj') {
+        const text = await file.text();
+        loadedScene = parseOBJ(text);
+      } else if (ext === 'stl') {
+        const buffer = await file.arrayBuffer();
+        loadedScene = parseSTL(buffer);
+      } else if (ext === 'ply') {
+        const buffer = await file.arrayBuffer();
+        loadedScene = parsePLY(buffer);
+      } else if (ext === 'gltf' || ext === 'glb') {
+        const buffer = await file.arrayBuffer();
+        loadedScene = await parseGLTF(buffer);
+      } else {
+        setStatus(`Input format .${ext} not yet supported. Supported: ${supportedFormats.input.join(', ')}`);
+        setIsProcessing(false);
+        return;
+      }
+
+      setScene(loadedScene);
+
+      let blob;
+      let outputExt = outputFormat;
+
+      if (outputFormat === 'gltf') {
+        blob = await exportToGLTF(loadedScene);
+        outputExt = 'gltf';
+      } else if (outputFormat === 'glb') {
+        blob = await exportToGLB(loadedScene);
+        outputExt = 'glb';
+      } else if (outputFormat === 'obj') {
+        blob = exportToOBJ(loadedScene);
+        outputExt = 'obj';
+      } else if (outputFormat === 'stl') {
+        blob = exportToSTL(loadedScene);
+        outputExt = 'stl';
+      } else if (outputFormat === 'ply') {
+        blob = await exportToPLY(loadedScene);
+        outputExt = 'ply';
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${file.name.split('.')[0]}_converted.${outputExt}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setStatus('Conversion successful! Download started.');
+    } catch (error) {
+      console.error(error);
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-8 border border-white/20">
+          <h1 className="text-4xl font-bold text-white mb-2 text-center">
+            3D File Converter
+          </h1>
+          <p className="text-purple-200 text-center mb-8">
+            Convert between OBJ, STL, PLY, GLTF, and GLB formats
+          </p>
+
+          <div className="space-y-6">
+            <div>
+              <label className="block text-white font-medium mb-3">
+                Upload 3D File
+              </label>
+              <div className="relative">
+                <input
+                  type="file"
+                  onChange={handleFileUpload}
+                  accept=".obj,.stl,.ply,.gltf,.glb,.fbx,.dae"
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className="flex items-center justify-center w-full p-6 border-2 border-dashed border-purple-400 rounded-lg cursor-pointer hover:border-purple-300 hover:bg-white/5 transition-all"
+                >
+                  <div className="text-center">
+                    <Upload className="mx-auto h-12 w-12 text-purple-300 mb-2" />
+                    <span className="text-white">
+                      {file ? file.name : 'Click to upload or drag and drop'}
+                    </span>
+                    <p className="text-purple-300 text-sm mt-1">
+                      Supported: {supportedFormats.input.join(', ').toUpperCase()}
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-white font-medium mb-3">
+                Output Format
+              </label>
+              <select
+                value={outputFormat}
+                onChange={(e) => setOutputFormat(e.target.value)}
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+              >
+                <option value="gltf">GLTF (.gltf)</option>
+                <option value="glb">GLB (.glb)</option>
+                <option value="obj">OBJ (.obj)</option>
+                <option value="stl">STL (.stl)</option>
+                <option value="ply">PLY (.ply)</option>
+              </select>
+            </div>
+
+            <button
+              onClick={handleConvert}
+              disabled={!file || isProcessing}
+              className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold py-4 px-6 rounded-lg hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  Converting...
+                </>
+              ) : (
+                <>
+                  <Download size={20} />
+                  Convert & Download
+                </>
+              )}
+            </button>
+
+            {status && (
+              <div
+                className={`flex items-start gap-3 p-4 rounded-lg ${
+                  status.includes('Error') || status.includes('not yet supported')
+                    ? 'bg-red-500/20 border border-red-400/30'
+                    : status.includes('successful')
+                    ? 'bg-green-500/20 border border-green-400/30'
+                    : 'bg-blue-500/20 border border-blue-400/30'
+                }`}
+              >
+                {status.includes('Error') || status.includes('not yet supported') ? (
+                  <AlertCircle className="text-red-300 mt-0.5 flex-shrink-0" size={20} />
+                ) : status.includes('successful') ? (
+                  <Check className="text-green-300 mt-0.5 flex-shrink-0" size={20} />
+                ) : (
+                  <Loader2 className="text-blue-300 mt-0.5 flex-shrink-0 animate-spin" size={20} />
+                )}
+                <p className="text-white text-sm">{status}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-white/10">
+            <h3 className="text-white font-medium mb-3">How to use:</h3>
+            <ol className="text-purple-200 text-sm space-y-2">
+              <li>1. Upload your 3D file (OBJ, STL, PLY, GLTF, or GLB)</li>
+              <li>2. Select your desired output format</li>
+              <li>3. Click "Convert & Download" to get your converted file</li>
+            </ol>
+          </div>
+        </div>
+
+        <p className="text-center text-purple-300 text-sm mt-6">
+          All processing happens in your browser - your files are never uploaded to a server
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default FormatConverter;
